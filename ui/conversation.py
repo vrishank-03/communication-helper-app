@@ -107,3 +107,34 @@ def render_conversation(conversation=None):
                     f"{entry.get('summary', '')}"
                 )
             st.markdown("---")
+
+        elif t == "admin_review":
+            title, box = _REVIEW_MESSAGES.get(
+                entry.get("action"), ("Reviewer update.", st.info)
+            )
+            note = (entry.get("note") or "").strip()
+            box(f"**{title}**" + (f"\n\nReviewer note: {note}" if note else ""))
+
+
+_REVIEW_MESSAGES = {
+    "CERTIFIED": (
+        "Reviewer decision: Certified. A Master Trainer has reviewed your session and confirmed certification.",
+        st.success,
+    ),
+    "NOT_CERTIFIED": (
+        "Reviewer decision: Not certified. A Master Trainer has reviewed your session.",
+        st.warning,
+    ),
+    "HOLD_CLEARED": (
+        "Review complete. The hold on your session has been lifted. Please record and submit an original response to continue.",
+        st.info,
+    ),
+    "VIOLATION_CONFIRMED": (
+        "This session was closed following a submission integrity review.",
+        st.error,
+    ),
+    "REOPENED": (
+        "Your session has been reopened. Please submit your response again.",
+        st.info,
+    ),
+}

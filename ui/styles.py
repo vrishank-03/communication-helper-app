@@ -7,18 +7,29 @@ import streamlit as st
 def inject_styles():
     st.markdown("""
 <style>
+    /* Hide the entire top header (removes Stop, Deploy, and the hamburger menu) */
+    header {visibility: hidden;}
+        
+    /* Hide the default Streamlit footer "Made with Streamlit" */
+    footer {visibility: hidden;}
+    
+    /* Hide the main menu */
+    #MainMenu {visibility: hidden;}
+    
     .stApp { background-color: #FAFBFC; }
-    h1, h2, h3 {
+    h1, h2, h3, h4 {
         color: #181818;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         font-weight: 600;
     }
-    .stButton>button {
-        background-color: #0176D3; color: white; border-radius: 6px;
-        padding: 8px 20px; font-weight: 500; border: none;
+    /* Button colours come from [theme] primaryColor in .streamlit/config.toml */
+    .stButton>button, .stFormSubmitButton>button {
+        border-radius: 6px; font-weight: 500;
         font-family: 'Inter', -apple-system, sans-serif;
     }
-    .stButton>button:hover { background-color: #014486; color: white; }
+    [data-testid="stMetric"] { background: #FFFFFF; }
+    [data-testid="stMetricLabel"] p { color: #5A6472; font-size: 0.8rem; font-weight: 500; }
+    [data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: 600; color: #181818; }
     .q-card {
         background: #FFFFFF; border-left: 4px solid #0176D3;
         padding: 16px; margin: 12px 0; border-radius: 4px;

@@ -86,3 +86,12 @@ INVALID_CONTENT_TYPES = {
     "SILENT_OR_INAUDIBLE",
     "OTHER_UNRELATED",
 }
+
+# ── Review Workflow ──────────────────────────────────────────
+SECURITY_FLAG_REASON = "CRITICAL_SECURITY_FLAG"
+
+# Finished attempts (count towards the weekly limit)
+COMPLETED_PHASES = ("CERTIFIED", "ESCALATED", "NOT_CERTIFIED", "REJECTED")
+
+# Phases that need an admin before the educator can move on
+ADMIN_PENDING_PHASES = ("ESCALATED", "ESCALATED_PLAGIARISM", "ERROR")

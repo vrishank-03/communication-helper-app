@@ -1,0 +1,14 @@
+# .streamlit/config.toml
+
+[theme]
+# Locks the app to Light mode so it never conflicts with our custom CSS
+base = "light"
+primaryColor = "#0176D3"
+backgroundColor = "#FAFBFC"
+secondaryBackgroundColor = "#F1F3F6"
+textColor = "#181818"
+font = "sans serif"
+
+[client]
+# Completely removes the "Deploy", "Stop", and Theme toggle menu for end-users
+toolbarMode = "viewer"
