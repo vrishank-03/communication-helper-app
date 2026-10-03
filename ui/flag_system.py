@@ -4,15 +4,28 @@ Educator flag / dispute system.
 
 import os
 import uuid
-from datetime import datetime, timezone
 
 import streamlit as st
 
 from core.database import get_conn
+from core.config import SECURITY_FLAG_REASON
 
 _APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _FLAG_DIR = os.path.join(_APP_DIR, "data", "flag_attachments")
 os.makedirs(_FLAG_DIR, exist_ok=True)
+
+
+def _load_reports(sid):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT reason, status, resolution_note, created_at "
+                "FROM evaluation_flags "
+                "WHERE session_id = %s AND reason <> %s "
+                "ORDER BY created_at",
+                (sid, SECURITY_FLAG_REASON),
+            )
+            return cur.fetchall()
 
 
 def render_flag_system():
@@ -22,6 +35,16 @@ def render_flag_system():
         return
 
     with st.expander("Report an Issue with this Evaluation"):
+        for reason, status, note, created in _load_reports(sid):
+            when = created.strftime("%d %b %Y, %H:%M") if created else ""
+            if status == "RESOLVED":
+                st.success(
+                    f"**Report resolved** ({reason}, submitted {when})"
+                    + (f"\n\nReviewer response: {note}" if note else "")
+                )
+            else:
+                st.info(f"**Report under review** ({reason}, submitted {when})")
+
         st.caption(
             "If you believe the automated assessment mischaracterized "
             "your response, submit a review request for the Master "
@@ -50,7 +73,7 @@ def render_flag_system():
             key=f"files_{sid}",
         )
 
-        if st.button("Submit Report", key=f"btn_{sid}"):
+        if st.button("Submit Report", key=f"btn_{sid}", type="primary"):
             if not flag_details.strip():
                 st.error("Please provide a brief explanation before submitting.")
             elif len(uploaded_shots) > 2:
@@ -60,7 +83,7 @@ def render_flag_system():
                 for idx, file in enumerate(uploaded_shots[:2]):
                     path = os.path.join(
                         _FLAG_DIR,
-                        f"{sid[:8]}_shot_{idx}_{file.name}",
+                        f"{sid[:8]}_shot_{idx}_{os.path.basename(file.name)}",
                     )
                     with open(path, "wb") as f:
                         f.write(file.read())
@@ -74,8 +97,8 @@ def render_flag_system():
                         cur.execute(
                             "INSERT INTO evaluation_flags "
                             "(id, session_id, educator_id, reason, details, "
-                            " screenshot_1, screenshot_2, created_at) "
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                            " screenshot_1, screenshot_2) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                             (
                                 str(uuid.uuid4()),
                                 sid,
@@ -83,7 +106,6 @@ def render_flag_system():
                                 flag_reason,
                                 flag_details,
                                 s1, s2,
-                                datetime.now(timezone.utc).isoformat(),
                             ),
                         )
                     conn.commit()

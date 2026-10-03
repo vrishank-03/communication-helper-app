@@ -68,5 +68,13 @@ def init_db():
                     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # 5. Flag resolution tracking (safe to re-run on existing databases)
+            cur.execute("""
+                ALTER TABLE evaluation_flags
+                    ADD COLUMN IF NOT EXISTS status          TEXT NOT NULL DEFAULT 'OPEN',
+                    ADD COLUMN IF NOT EXISTS resolution_note TEXT,
+                    ADD COLUMN IF NOT EXISTS resolved_at     TIMESTAMP
+            """)
         conn.commit()
     logger.info("core.database - Schema bootstrap complete.")

@@ -2,6 +2,7 @@
 """
 Session persistence helpers for the Streamlit side.
 """
+import re
 import json
 import uuid
 import random
@@ -48,15 +49,33 @@ def sync_from_db(force: bool = False) -> bool:
             hydrate_from_row(dict(row))
             return True
 
-def create_session(educator_id: str, scenario: str) -> str:
-    """Insert a fresh evaluation session and return its ID."""
-    sid = str(uuid.uuid4())
+def create_session(educator_id: str, educator_name: str, scenario: str) -> str:
+    """Insert a fresh evaluation session and return its ID using a NAME_01 format."""
+    clean_name = re.sub(r"[^A-Z0-9]", "", (educator_name or "").upper())
+    if not clean_name:
+        clean_name = re.sub(r"[^A-Z0-9]", "", educator_id.upper())
+
     nonce = str(random.randint(100000, 999999))
     conversation = [{"type": "scenario", "content": scenario}]
 
-    logger.info(f"services.session.create_session - Creating new session {sid} for {educator_id}")
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM evaluation_sessions WHERE educator_id = %s",
+                (educator_id,),
+            )
+            count = cur.fetchone()[0] + 1
+
+            # Bump the number until the ID is unused (handles same-name educators)
+            while True:
+                sid = f"{clean_name}_{count:02d}"
+                cur.execute("SELECT 1 FROM evaluation_sessions WHERE id = %s", (sid,))
+                if cur.fetchone() is None:
+                    break
+                count += 1
+
+            logger.info(f"services.session.create_session - Creating new session {sid} for {educator_id}")
+
             cur.execute(
                 "INSERT INTO evaluation_sessions "
                 "(id, educator_id, scenario, nonce, phase, round_number, "

@@ -11,7 +11,6 @@ import os
 import json
 import time
 import traceback
-from datetime import datetime, timezone
 
 from psycopg2.extras import RealDictCursor
 
@@ -64,13 +63,12 @@ def _db_write(session_id, phase, round_number, conversation, state_data):
                 "SET phase = %s, round_number = %s, "
                 "    conversation = %s::jsonb, "
                 "    state_data = %s::jsonb, "
-                "    updated_at = %s "
+                "    updated_at = CURRENT_TIMESTAMP "
                 "WHERE id = %s",
                 (
                     phase, round_number,
                     json.dumps(conversation, default=str),
                     json.dumps(state_data, default=str),
-                    datetime.now(timezone.utc).isoformat(),
                     session_id,
                 ),
             )
@@ -85,20 +83,19 @@ def _db_error(session_id):
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE evaluation_sessions "
-                "SET phase = 'ERROR', updated_at = %s WHERE id = %s",
-                (datetime.now(timezone.utc).isoformat(), session_id),
+                "SET phase = 'ERROR', updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (session_id,),
             )
         conn.commit()
 
 
 # ── Main task ────────────────────────────────────────────────
 
-# THE FIX: Added name="worker.task.process_video_submission" to perfectly match Streamlit's call
 @celery_app.task(bind=True, name="worker.task.process_video_submission", autoretry_for=(), max_retries=0)
 def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
     """Background AI evaluation of an educator's video submission."""
     sid = str(session_id)[:8]
-    logger.info(f"[{sid}] 🚀 {task_type} JOB STARTED - File: {file_path}")
+    logger.info(f"[{sid}] {task_type} JOB STARTED - File: {file_path}")
     remote = None
 
     try:
@@ -130,7 +127,7 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
             )
 
         # ── Upload video to Google ───────────────────────────
-        logger.info(f"[{sid}] ⏳ Uploading video to Gemini...")
+        logger.info(f"[{sid}] Uploading video to Gemini...")
         if not file_path or not os.path.exists(file_path):
             raise FileNotFoundError(f"Video file does not exist: {file_path}")
 
@@ -140,10 +137,10 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
             remote = gemini_client.files.get(name=remote.name)
         if remote.state.name == "FAILED":
             raise RuntimeError("Video rejected by Google API.")
-        logger.info(f"[{sid}] ✓ Upload complete.")
+        logger.info(f"[{sid}] Upload complete.")
 
         # ── Transcribe ───────────────────────────────────────
-        logger.info(f"[{sid}] 🧠 Transcribing...")
+        logger.info(f"[{sid}] Transcribing...")
         step1, transcription_model = call_model(
             [remote, TRANSCRIBE_PROMPT.format(guardrails=GUARDRAILS)],
             TRANSCRIBE_SCHEMA,
@@ -157,7 +154,7 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
         total_videos_submitted += 1
 
         logger.info(
-            f"[{sid}] ✓ {word_count} words | {round(duration)}s "
+            f"[{sid}] {word_count} words | {round(duration)}s "
             f"| {wpm} WPM | {content_type}"
         )
 
@@ -166,11 +163,11 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
         # ═════════════════════════════════════════════════════
         if task_type == "INITIAL":
             if should_gate(step1, MIN_WORDS_INITIAL):
-                logger.warning(f"[{sid}] ⚠ Content gate → auto-gated")
+                logger.warning(f"[{sid}] Content gate -> auto-gated")
                 result = auto_fail_video(step1)
                 consecutive_insufficient += 1
             else:
-                logger.info(f"[{sid}] ⚖️ Grading initial video...")
+                logger.info(f"[{sid}] Grading initial video...")
                 grade_prompt = VIDEO_GRADE_PROMPT.format(
                     guardrails=GUARDRAILS,
                     scenario=scenario,
@@ -202,7 +199,7 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
                 f"[{sid}] Initial scores: "
                 f"P={result.get('pedagogy_score')} "
                 f"T={result.get('tech_accuracy_score')} "
-                f"C={result.get('communication_score')} → FOLLOW_UP"
+                f"C={result.get('communication_score')} -> FOLLOW_UP"
             )
 
             conversation.append({
@@ -231,11 +228,11 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
         # ═════════════════════════════════════════════════════
         else:
             if should_gate(step1, MIN_WORDS_FOLLOWUP):
-                logger.warning(f"[{sid}] ⚠ Content gate → auto-gated")
+                logger.warning(f"[{sid}] Content gate -> auto-gated")
                 answer_eval = auto_fail_answer(step1)
                 consecutive_insufficient += 1
             else:
-                logger.info(f"[{sid}] ⚖️ Grading follow-up answer...")
+                logger.info(f"[{sid}] Grading follow-up answer...")
                 context = build_context(conversation)
                 answer_prompt = ANSWER_GRADE_PROMPT.format(
                     guardrails=GUARDRAILS,
@@ -304,9 +301,9 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
                 phase = "ESCALATED"
                 active_question = None
 
-            # ── Round decision ───────────────────────────────
+            # ── DETERMINISTIC Round Decision ───────────────────────────────
             else:
-                logger.info(f"[{sid}] ⚖️ Making round decision...")
+                logger.info(f"[{sid}] Making round decision...")
                 context = build_context(conversation)
                 decision_prompt = ROUND_DECISION_PROMPT.format(
                     guardrails=GUARDRAILS,
@@ -318,61 +315,51 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
                 )
 
                 low_confidence = decision_model == FAILSAFE_MODEL
+                
+                # 1. Extract Scores AND AI Evidence Reasoning
                 round_scores = {
-                    "pedagogy_score": decision["pedagogy_score"],
-                    "tech_accuracy_score": decision["tech_accuracy_score"],
-                    "communication_score": decision["communication_score"],
+                    "pedagogy_score": int(decision.get("pedagogy_score", 0)),
+                    "pedagogy_reasoning": decision.get("pedagogy_reasoning", "No specific pedagogy feedback provided."),
+                    "tech_accuracy_score": int(decision.get("tech_accuracy_score", 0)),
+                    "tech_accuracy_reasoning": decision.get("tech_accuracy_reasoning", "No specific technical feedback provided."),
+                    "communication_score": int(decision.get("communication_score", 0)),
+                    "communication_reasoning": decision.get("communication_reasoning", "No specific communication feedback provided."),
                 }
-                model_decision = decision["decision"]
+                
+                p = round_scores["pedagogy_score"]
+                t = round_scores["tech_accuracy_score"]
+                c = round_scores["communication_score"]
 
-                if model_decision == "CERTIFIED" and not low_confidence:
-                    conversation.append({
-                        "type": "round_decision",
-                        "round": round_number,
-                        "decision": "CERTIFIED",
-                        "summary": decision["round_summary"],
-                        "improvement_areas": decision.get(
-                            "improvement_areas", ""
-                        ),
-                        "scores": round_scores,
-                        "_used_model": decision_model,
-                    })
-                    phase = "CERTIFIED"
-                    logger.info(f"[{sid}] 🏆 CERTIFIED")
-
-                elif model_decision == "CERTIFIED" and low_confidence:
-                    summary = (
-                        decision["round_summary"]
-                        + " (Fallback model — forwarded for confirmation.)"
-                    )
-                    conversation.append({
-                        "type": "round_decision",
-                        "round": round_number,
-                        "decision": "ESCALATED",
-                        "summary": summary,
-                        "improvement_areas": decision.get(
-                            "improvement_areas", ""
-                        ),
-                        "scores": round_scores,
-                        "_used_model": decision_model,
-                    })
-                    phase = "ESCALATED"
-                    logger.warning(f"[{sid}] ⚠ Fallback certification → ESCALATED")
-
+                # 2. STRIP AI DECISION POWER (Deterministic Math)
+                if p >= 8 and t >= 8 and c >= 8:
+                    if low_confidence:
+                        computed_decision = "ESCALATED"
+                        summary = decision.get("round_summary", "") + " (System Note: Fallback AI model used. Master Trainer verification required to confirm scores.)"
+                    else:
+                        computed_decision = "CERTIFIED"
+                        summary = decision.get("round_summary", "")
+                elif p <= 4 or t <= 4 or c <= 4:
+                    computed_decision = "ESCALATED"
+                    summary = decision.get("round_summary", "") + f" (System Note: Critical failure in one or more core pillars [P:{p}, T:{t}, C:{c}]. Requires 1-on-1 coaching.)"
                 else:
-                    conversation.append({
-                        "type": "round_decision",
-                        "round": round_number,
-                        "decision": "ESCALATED",
-                        "summary": decision["round_summary"],
-                        "improvement_areas": decision.get(
-                            "improvement_areas", ""
-                        ),
-                        "scores": round_scores,
-                        "_used_model": decision_model,
-                    })
-                    phase = "ESCALATED"
-                    logger.warning(f"[{sid}] ⚠ Escalated by model decision.")
+                    computed_decision = "ESCALATED"
+                    summary = decision.get("round_summary", "") + f" (System Note: Educator did not meet the 8/10 mastery threshold across all pillars [P:{p}, T:{t}, C:{c}].)"
+
+                conversation.append({
+                    "type": "round_decision",
+                    "round": round_number,
+                    "decision": computed_decision,
+                    "summary": summary,
+                    "improvement_areas": decision.get("improvement_areas", ""),
+                    "scores": round_scores,
+                    "_used_model": decision_model,
+                })
+                
+                phase = computed_decision
+                if phase == "CERTIFIED":
+                    logger.info(f"[{sid}] DETERMINISTICALLY CERTIFIED (P:{p} T:{t} C:{c})")
+                else:
+                    logger.warning(f"[{sid}] DETERMINISTICALLY ESCALATED (P:{p} T:{t} C:{c})")
 
                 active_question = None
 
@@ -386,7 +373,7 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
         _db_write(
             session_id, phase, round_number, conversation, final_state,
         )
-        logger.info(f"[{sid}] ✅ JOB SUCCESS → {phase}")
+        logger.info(f"[{sid}] JOB SUCCESS -> {phase}")
 
         return {
             "session_id": session_id,
@@ -396,12 +383,12 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
         }
 
     except Exception as exc:
-        logger.error(f"[{sid}] ❌ CRITICAL ERROR: {exc}")
+        logger.error(f"[{sid}] CRITICAL ERROR: {exc}")
         traceback.print_exc()
         try:
             _db_error(session_id)
         except Exception as db_err:
-            logger.error(f"[{sid}] ❌ Could not write ERROR state: {db_err}")
+            logger.error(f"[{sid}] Could not write ERROR state: {db_err}")
         raise
 
     finally:
@@ -409,13 +396,13 @@ def process_video_submission(self, session_id, file_path, task_type="INITIAL"):
         try:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
-            logger.info(f"[{sid}] 🧹 Local video deleted.")
+            logger.info(f"[{sid}] Local video deleted.")
         except Exception as e:
-            logger.warning(f"[{sid}] ⚠ Could not delete local video: {e}")
+            logger.warning(f"[{sid}] Could not delete local video: {e}")
         try:
             if remote:
                 gemini_client.files.delete(name=remote.name)
-            logger.info(f"[{sid}] 🧹 Remote Google file deleted.")
+            logger.info(f"[{sid}] Remote Google file deleted.")
         except Exception as e:
-            logger.warning(f"[{sid}] ⚠ Could not delete remote file: {e}")
-        logger.info(f"[{sid}] 🧹 Cleanup complete.\n")
+            logger.warning(f"[{sid}] Could not delete remote file: {e}")
+        logger.info(f"[{sid}] Cleanup complete.\n")
