@@ -76,5 +76,81 @@ def init_db():
                     ADD COLUMN IF NOT EXISTS resolution_note TEXT,
                     ADD COLUMN IF NOT EXISTS resolved_at     TIMESTAMP
             """)
+
+            # 6. Video integrity fingerprints (only verified rows are used as references)
+            cur.execute("""
+                ALTER TABLE submissions
+                    ADD COLUMN IF NOT EXISTS frame_hashes   JSONB,
+                    ADD COLUMN IF NOT EXISTS face_embedding JSONB,
+                    ADD COLUMN IF NOT EXISTS thumbnail      TEXT,
+                    ADD COLUMN IF NOT EXISTS verified       BOOLEAN NOT NULL DEFAULT FALSE
+            """)
+
+            # 7. Educator suspension (set by admins after a confirmed conduct/integrity violation)
+            cur.execute("""
+                ALTER TABLE educators
+                    ADD COLUMN IF NOT EXISTS suspended_at      TIMESTAMP,
+                    ADD COLUMN IF NOT EXISTS suspension_reason TEXT
+            """)
+
+            # 8. Attempts an admin has waived from the weekly limit
+            cur.execute("""
+                ALTER TABLE evaluation_sessions
+                    ADD COLUMN IF NOT EXISTS excluded_from_limit BOOLEAN NOT NULL DEFAULT FALSE
+            """)
+
+            # 9. Richer ticket metadata (conduct severity, structured evidence, who resolved it and how)
+            cur.execute("""
+                ALTER TABLE evaluation_flags
+                    ADD COLUMN IF NOT EXISTS severity          TEXT,
+                    ADD COLUMN IF NOT EXISTS meta              JSONB,
+                    ADD COLUMN IF NOT EXISTS resolution_action TEXT,
+                    ADD COLUMN IF NOT EXISTS resolved_by       TEXT
+            """)
+
+            # 10. One row per worker attempt: feeds the AI/system health view
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS processing_events (
+                    id                  SERIAL PRIMARY KEY,
+                    session_id          TEXT,
+                    job_id              TEXT,
+                    task_type           TEXT,
+                    attempt             INTEGER,
+                    outcome             TEXT,
+                    error_kind          TEXT,
+                    error_message       TEXT,
+                    transcription_model TEXT,
+                    grading_model       TEXT,
+                    model_trace         JSONB,
+                    duration_seconds    DOUBLE PRECISION,
+                    started_at          TIMESTAMP,
+                    finished_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # 11. Admin audit trail
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS admin_audit_log (
+                    id            SERIAL PRIMARY KEY,
+                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    admin_name    TEXT,
+                    action        TEXT NOT NULL,
+                    target_type   TEXT,
+                    target_id     TEXT,
+                    session_id    TEXT,
+                    note          TEXT,
+                    internal_note TEXT,
+                    meta          JSONB
+                )
+            """)
+
+            # 12. Soft locks so two reviewers don't work the same ticket
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS admin_claims (
+                    item_key   TEXT PRIMARY KEY,
+                    admin_name TEXT NOT NULL,
+                    claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         conn.commit()
     logger.info("core.database - Schema bootstrap complete.")

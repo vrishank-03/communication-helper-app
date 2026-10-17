@@ -4,7 +4,12 @@ Render the evaluation conversation as structured UI cards.
 This is what the EDUCATOR sees — no internal scores, no audit metadata.
 """
 
+import re
+
 import streamlit as st
+
+# Older records have internal notes appended to the summary; never show them to educators.
+_SYSTEM_NOTE_RE = re.compile(r"\s*\(System Note:.*?\)\s*$", re.S)
 
 
 def render_conversation(conversation=None):
@@ -96,16 +101,11 @@ def render_conversation(conversation=None):
 
         elif t == "round_decision":
             dec = entry.get("decision")
+            summary = _SYSTEM_NOTE_RE.sub("", entry.get("summary") or "").strip()
             if dec == "CERTIFIED":
-                st.success(
-                    f"**Evaluation Status: Certified.** "
-                    f"{entry.get('summary', '')}"
-                )
+                st.success(f"**Evaluation Status: Certified.** {summary}")
             else:
-                st.info(
-                    f"**Evaluation Status: Under Review.** "
-                    f"{entry.get('summary', '')}"
-                )
+                st.info(f"**Evaluation Status: Under Review.** {summary}")
             st.markdown("---")
 
         elif t == "admin_review":
