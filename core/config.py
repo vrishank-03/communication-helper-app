@@ -80,6 +80,21 @@ MODEL_CHAIN = [
 
 FAILSAFE_MODEL = MODEL_CHAIN[-1]
 
+# ── Upstream resilience ─────────────────────────────────────
+VIDEO_REQUEST_TIMEOUT_MS = 150_000   # per transcription request (video input)
+TEXT_REQUEST_TIMEOUT_MS = 60_000     # per text-only grading / moderation request
+MODEL_CASCADE_PASSES = 2             # passes over MODEL_CHAIN inside one call
+MODEL_CALL_DEADLINE_S = 480          # hard wall-clock budget for one call_model()
+MODEL_COOLDOWN_SECONDS = 90          # skip a model for this long after a 429/503/timeout
+UPLOAD_MAX_WAIT_S = 300              # max time to wait for Google to finish processing a file
+
+# When every model is overloaded the job is re-queued instead of failing.
+# One entry per deferred retry (seconds) -> ~40 minutes of automatic recovery.
+DEFERRED_RETRY_SCHEDULE = (60, 180, 420, 900, 1200)
+EDUCATOR_SELF_RETRY_LIMIT = 3        # "Retry evaluation" clicks allowed per session
+PROCESSING_STALE_SECONDS = 600       # RUNNING/QUEUED longer than this = stuck
+RETAINED_VIDEO_DIR = BASE_DIR / "data" / "retained_videos"
+
 # ── Content Types ────────────────────────────────────────────
 INVALID_CONTENT_TYPES = {
     "PROMOTIONAL_OR_SCRIPTED",
@@ -87,11 +102,35 @@ INVALID_CONTENT_TYPES = {
     "OTHER_UNRELATED",
 }
 
+# ── Conduct moderation ──────────────────────────────────────
+MODERATION_SEVERITIES = ("NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+CONDUCT_REDO_LIMIT = 1               # MEDIUM incidents allowed before the session is held
+
 # ── Review Workflow ──────────────────────────────────────────
 SECURITY_FLAG_REASON = "CRITICAL_SECURITY_FLAG"
+CONDUCT_FLAG_REASON = "CONDUCT_FLAG"
+SYSTEM_FLAG_REASONS = (SECURITY_FLAG_REASON, CONDUCT_FLAG_REASON)
 
 # Finished attempts (count towards the weekly limit)
 COMPLETED_PHASES = ("CERTIFIED", "ESCALATED", "NOT_CERTIFIED", "REJECTED")
 
 # Phases that need an admin before the educator can move on
-ADMIN_PENDING_PHASES = ("ESCALATED", "ESCALATED_PLAGIARISM", "ERROR")
+ADMIN_PENDING_PHASES = ("ESCALATED", "ESCALATED_PLAGIARISM", "ESCALATED_CONDUCT", "ERROR")
+
+# Ticket service-level targets (hours until a ticket is considered overdue)
+TICKET_SLA_HOURS = {
+    "conduct": 4,
+    "hold": 24,
+    "error": 4,
+    "report": 48,
+    "review": 72,
+    "conduct_review": 48,
+}
+
+# ── Video Integrity ──────────────────────────────────────────
+INTEGRITY_DIR = BASE_DIR / "data" / "integrity"   # models, thumbnails, held videos
+FRAME_SAMPLE_SECONDS = 2        # one fingerprint frame every N seconds
+FRAME_HASH_DISTANCE = 10        # max differing bits (of 64) for two frames to count as the same
+DUPLICATE_FRAME_RATIO = 0.6     # share of aligned frames that must match to call it a copy
+FACE_MATCH_THRESHOLD = 0.363    # SFace cosine: below this vs own earlier videos = different person
+FACE_SHARED_THRESHOLD = 0.5     # SFace cosine: above this vs another educator = same person
